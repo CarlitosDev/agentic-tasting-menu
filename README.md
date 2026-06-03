@@ -34,7 +34,7 @@ MCP/agent chain.
 Pure domain function: `get_student_status(student_id) -> str`. Returns a random
 "has done / hasn't done" string. No I/O, no auth, no framework imports. Both the
 MCP server and the REST learning track call this directly — it is the single source
-of truth that every layer above it shapes and authorizes access to.
+of truth that every layer above it shapes and authorizes access to. Scaffolding for `data services`.
 
 ### `src/mcp_rest_lab/auth.py`
 Shared identity helpers used by every layer:
@@ -49,13 +49,14 @@ Shared identity helpers used by every layer:
   token's `students` claim.
 
 Claim shapes (`iss`/`aud`/`sub`/`role`/`exp`/custom) are kept identical to what
-Cognito or Auth0 would issue, so swapping HS256 → RS256/JWKS later is a single
+**Cognito** or **Auth0** would issue, so swapping HS256 → RS256/JWKS later is a single
 `verify()` change, not a rewrite of every caller.
 
 ### `src/mcp_rest_lab/mint_tokens.py`
 Run once to bootstrap the local environment. Prints 5 student tokens and 1 teacher
 token in copy-pasteable form, and writes `tokens.json` so the Streamlit selector
 can load them without manual pasting.
+`uv run python -m mcp_rest_lab.mint_tokens`
 
 ### `src/mcp_rest_lab/mcp_server.py`
 FastMCP server over **streamable HTTP** on `:8000` (path `/mcp`). Two tools:
@@ -126,6 +127,8 @@ uv run python -m mcp_rest_lab.mcp_server
 uv run uvicorn mcp_rest_lab.api:app --port 8001
 
 # 5. Terminal C — AgentCore runtime (:8080, needs AWS Bedrock creds)
+source .env
+aws sso login --profile "$AWS_PROFILE"
 uv run python -m mcp_rest_lab.runtime
 
 # 6. Terminal D — Streamlit thin client
