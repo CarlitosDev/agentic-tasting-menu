@@ -1,0 +1,26 @@
+[project]
+name = "mcp-rest-lab"
+version = "0.1.0"
+description = "Layered agentic API lab: core -> MCP + REST -> Strands agent -> AgentCore serving -> Streamlit client, with token-based identity propagated end to end."
+readme = "README.md"
+requires-python = ">=3.11"
+# Versions pinned to what the # VERIFY notes were confirmed against. Bump
+# deliberately and re-verify the SDK signatures (see README "SDK verification").
+dependencies = [
+    "pyjwt==2.13.0",
+    "mcp==1.27.2",
+    "strands-agents==1.42.0",
+    "strands-agents-tools==0.7.0",
+    "bedrock-agentcore==1.13.0",
+    "fastapi==0.136.3",
+    "uvicorn==0.48.0",
+    "httpx==0.28.1",
+    "streamlit==1.58.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_rest_lab"]
