@@ -10,7 +10,8 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 
-from mcp.client.streamable_http import streamablehttp_client
+import httpx
+from mcp.client.streamable_http import streamable_http_client
 from strands import Agent
 from strands.models import BedrockModel
 from strands.tools.mcp import MCPClient
@@ -22,9 +23,7 @@ MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp")
 # VERIFY: a Bedrock model id available in your account/region. Cross-region
 # inference profile ids look like "us.anthropic.claude-sonnet-4-*". Override via
 # env without touching code.
-BEDROCK_MODEL_ID = os.environ.get(
-    "BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-20250514-v1:0"
-)
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 SYSTEM_PROMPT = (
@@ -37,29 +36,25 @@ SYSTEM_PROMPT = (
 )
 
 
+# The Bedrock model is identity-independent (it carries no token), so it is built
+# once and reused across requests instead of being rebuilt — and a new boto3
+# client spun up — on every invocation.
+_MODEL: BedrockModel | None = None
+
+
 def build_model() -> BedrockModel:
-    """Build the Bedrock model the agent reasons with.
+    """Build (once) the Bedrock model the agent reasons with.
+
+    Cached in a module-level singleton: nothing about the model depends on the
+    caller's identity, so there is no reason to reconstruct it per request.
 
     VERIFY (confirmed against strands-agents 1.42.0): BedrockModel takes
     region_name plus model config kwargs (model_id) via **model_config.
     """
-    return BedrockModel(model_id=BEDROCK_MODEL_ID, region_name=AWS_REGION)
-
-
-def build_mcp_client(bearer_token: str) -> MCPClient:
-    """Build an MCP client over streamable HTTP, forwarding the bearer token.
-
-    VERIFY (confirmed against strands-agents 1.42.0 / mcp 1.27.2): MCPClient takes
-    a transport_callable returning the transport context manager;
-    streamablehttp_client(url, headers=...) accepts custom headers. We forward the
-    caller's token as Authorization so the MCP server can verify() it.
-    """
-    return MCPClient(
-        lambda: streamablehttp_client(
-            MCP_URL,
-            headers={"Authorization": f"Bearer {bearer_token}"},
-        )
-    )
+    global _MODEL
+    if _MODEL is None:
+        _MODEL = BedrockModel(model_id=BEDROCK_MODEL_ID, region_name=AWS_REGION)
+    return _MODEL
 
 
 def build_agent(mcp_client: MCPClient, model: BedrockModel | None = None) -> Agent:
@@ -79,15 +74,27 @@ def build_agent(mcp_client: MCPClient, model: BedrockModel | None = None) -> Age
 async def stream_answer(prompt: str, bearer_token: str) -> AsyncIterator[str]:
     """Given a prompt + bearer token, yield the agent's response text in chunks.
 
-    Opens the MCP client (which forwards the token), builds the agent, and streams.
+    The MCP connection is necessarily per-request: identity *is* the token, and it
+    rides on this HTTP connection (§6), so it cannot be shared across callers. The
+    httpx.AsyncClient that carries the Authorization header is therefore scoped to
+    the request via ``async with`` — we own it, so we must close it. (mcp 1.9+
+    renamed streamablehttp_client → streamable_http_client and dropped the headers=
+    kwarg; headers now travel on a pre-configured client, which the transport will
+    NOT close when caller-provided.)
+
     The client context stays open for the whole stream so tool calls succeed.
 
     VERIFY (confirmed against strands-agents 1.42.0): stream_async yields event
     dicts; text deltas arrive under the "data" key.
     """
-    mcp_client = build_mcp_client(bearer_token)
-    with mcp_client:
-        agent = build_agent(mcp_client)
-        async for event in agent.stream_async(prompt):
-            if "data" in event:
-                yield event["data"]
+    async with httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {bearer_token}"}
+    ) as http_client:
+        mcp_client = MCPClient(
+            lambda: streamable_http_client(MCP_URL, http_client=http_client)
+        )
+        with mcp_client:
+            agent = build_agent(mcp_client)
+            async for event in agent.stream_async(prompt):
+                if "data" in event:
+                    yield event["data"]

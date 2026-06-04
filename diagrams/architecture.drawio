@@ -1,0 +1,90 @@
+<mxfile host="Electron">
+  <diagram name="mcp-rest-lab architecture" id="0">
+    <mxGraphModel dx="4011" dy="1417" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=18;fontStyle=1;align=center;" value="mcp-rest-lab — Component Architecture" vertex="1">
+          <mxGeometry height="30" width="500" x="480" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="mint" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#CC6600;fontSize=12;" value="&lt;b&gt;mint_tokens.py&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#666666&quot;&gt;runs: python -m mcp_rest_lab.mint_tokens&lt;/font&gt;" vertex="1">
+          <mxGeometry height="80" width="240" x="-350" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="tokens" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" value="&lt;b&gt;tokens.json&lt;/b&gt;&lt;br/&gt;identity → JWT map&lt;br/&gt;&lt;font color=&#39;#666666&#39;&gt;student_001 … teacher_001&lt;/font&gt;" vertex="1">
+          <mxGeometry height="80" width="200" x="-330" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mint_tok" edge="1" parent="1" source="mint" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="tokens" value="writes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="auth" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;b&gt;auth.py&lt;/b&gt;&lt;br/&gt;make_token() / verify()&lt;br/&gt;bearer_from_header()&lt;br/&gt;&lt;font color=&#39;#666666&#39;&gt;HS256 · iss/aud/sub/role/exp&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="240" x="455" y="85" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mint_auth" edge="1" parent="1" source="mint" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" target="auth" value="calls make_token()">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="core" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="&lt;b&gt;core.py&lt;/b&gt;&lt;br/&gt;get_student_status(id)&lt;br/&gt;&lt;font color=&#39;#666666&#39;&gt;pure domain logic · no I/O · no auth&lt;/font&gt;" vertex="1">
+          <mxGeometry height="80" width="240" x="1300" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="streamlit" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#999999;fontSize=12;align=left;" value="&lt;b&gt;app/streamlit_app.py&lt;/b&gt;&lt;br&gt;Streamlit UI&lt;div&gt;&lt;font style=&quot;color: rgb(56, 56, 56);&quot;&gt;[&lt;i style=&quot;&quot;&gt;aka client with authentication&lt;/i&gt;]&lt;br&gt;&lt;/font&gt;&lt;br&gt;• sidebar: pick identity (student/teacher)&lt;br&gt;• loads tokens.json → selects JWT&lt;br&gt;• text input for prompt&lt;br&gt;• POST /invocations with Bearer token&lt;br&gt;• renders SSE stream as markdown&lt;/div&gt;" vertex="1">
+          <mxGeometry height="160" width="300" x="-200" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="e_tok_st" edge="1" parent="1" source="tokens" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="streamlit" value="reads JWT for chosen identity">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="runtime" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;" value="&lt;b&gt;runtime.py&lt;/b&gt;&lt;br&gt;BedrockAgentCoreApp&lt;br&gt;&lt;font color=&quot;#666666&quot;&gt;:8080  POST /invocations  GET /ping&lt;/font&gt;&lt;br&gt;&lt;br&gt;• extracts Bearer token from header&lt;br&gt;• calls &lt;b&gt;stream_answer&lt;/b&gt;(prompt, token)&lt;br&gt;• yields SSE chunks back to caller" vertex="1">
+          <mxGeometry height="160" width="310" x="420" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="e_st_rt" edge="1" parent="1" source="streamlit" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="runtime" value="POST /invocations&lt;br/&gt;Authorization: Bearer &lt;jwt&gt;&lt;br/&gt;body: {prompt}">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_rt_auth" edge="1" parent="1" source="runtime" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" target="auth" value="bearer_from_header()">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="agent" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#FF0000;fontSize=12;align=left;" value="&lt;b&gt;agent.py - MCP client&lt;/b&gt;&lt;br&gt;Strands Agent (Bedrock Claude/AWS models)&lt;br&gt;&lt;br&gt;• builds MCPClient with forwarded Bearer token&amp;nbsp;&lt;span style=&quot;background-color: transparent;&quot;&gt;[user is authenticated]&lt;/span&gt;&lt;div&gt;• lists MCP tools from server&lt;br&gt;• reasons:&amp;nbsp;&lt;div&gt;&lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;student? → get_my_status&lt;br&gt;  &lt;span style=&quot;white-space: pre;&quot;&gt;&#x9;&lt;/span&gt;teacher? → get_group_status&lt;br&gt;• streams text deltas&lt;/div&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="160" width="330" x="410" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="e_rt_ag" edge="1" parent="1" source="runtime" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="agent" value="stream_answer(prompt, token)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="595.0000000000009" y="630" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="mcp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;align=left;" value="&lt;b&gt;mcp_server.py&lt;/b&gt;&lt;br/&gt;FastMCP (streamable-HTTP)&lt;br/&gt;&lt;font color=&#39;#666666&#39;&gt;:8000  /mcp&lt;/font&gt;&lt;br/&gt;&lt;br/&gt;• verifies Bearer token on EVERY tool call&lt;br/&gt;• get_my_status() — student only, no args&lt;br/&gt;  identity comes from token sub&lt;br/&gt;• get_group_status(ids) — teacher only&lt;br/&gt;  ids must be subset of token.students" vertex="1">
+          <mxGeometry height="200" width="320" x="910" y="610" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ag_mcp" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="mcp" value="streamable-HTTP&lt;br/&gt;Authorization: Bearer &lt;jwt&gt;&lt;br/&gt;(forwarded from caller)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mcp_auth" edge="1" parent="1" source="mcp" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;exitX=0.5;exitY=0;entryX=1;entryY=1;" target="auth" value="verify(token)&lt;br/&gt;_claims_from_context()">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mcp_core" edge="1" parent="1" source="mcp" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" target="core" value="get_student_status(id)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="api" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;align=left;" value="&lt;b&gt;api.py&lt;/b&gt;&lt;br/&gt;FastAPI REST learning track&lt;br/&gt;&lt;font color=&#39;#666666&#39;&gt;:8001  POST /students/status&lt;/font&gt;&lt;br/&gt;&lt;br/&gt;• same auth.verify() as MCP server&lt;br/&gt;• calls core directly (not MCP)&lt;br/&gt;• NOT on the critical path — learning only" vertex="1">
+          <mxGeometry height="150" width="300" x="1620" y="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e_api_auth" edge="1" parent="1" source="api" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" target="auth" value="verify(token)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_api_core" edge="1" parent="1" source="api" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" target="core" value="get_student_status()">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="bedrock" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=12;" value="&lt;b&gt;AWS Bedrock&lt;/b&gt;&lt;br&gt;Claude Sonnet/AWS Nova (via env vars)&amp;nbsp;&lt;div&gt;(cross-region inference)&lt;br&gt;&lt;font color=&quot;#666666&quot;&gt;global.amazon.nova-2-lite-v1:0&lt;/font&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="70" width="310" x="420" y="1090" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ag_bk" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;html=1;" target="bedrock" value="BedrockModel inference calls">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="kMrlqOGPqK0UIjrOUt1H-3" connectable="0" parent="1" style="group" value="" vertex="1">
+          <mxGeometry height="350" width="320" x="-390" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="kMrlqOGPqK0UIjrOUt1H-1" parent="kMrlqOGPqK0UIjrOUt1H-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#8E38FF;" value="" vertex="1">
+          <mxGeometry height="320" width="320" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="kMrlqOGPqK0UIjrOUt1H-2" parent="kMrlqOGPqK0UIjrOUt1H-3" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="one-shot script&lt;div&gt;(create users Cognito-like)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="30" width="180" x="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
