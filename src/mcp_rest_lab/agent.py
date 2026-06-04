@@ -26,11 +26,20 @@ MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp")
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
+# The prompt deliberately names NO tool. Tool selection falls out of the tool
+# descriptions (see mcp_server.py docstrings), which the MCP client lists into the
+# model's context every turn. So this stays pure policy — behavior the schemas
+# can't express — and survives a tool rename untouched. We describe tools by the
+# capability we want ("the tool that returns the caller's own status"), never by
+# identifier.
 SYSTEM_PROMPT = (
-    "You are a student-status assistant. Use the available tools to answer. "
-    "A student asking about themselves -> use get_my_status (it takes no arguments; "
-    "the caller's identity comes from their token). A teacher asking about the "
-    "group -> use get_group_status with the student ids they mention. "
+    "You are a student-status assistant. Answer using the available tools, "
+    "choosing the tool whose description matches the request. "
+    "When the caller asks about their own status, use the tool that returns the "
+    "caller's own status; it needs no identity argument, because identity comes "
+    "from the caller's token, not from anything they type. "
+    "When the caller asks about a group of students, use the tool that returns "
+    "statuses for the specific student ids they name. "
     "Never ask the user for their identity; it is established by their token. "
     "Report exactly what the tools return."
 )

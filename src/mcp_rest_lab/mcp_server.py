@@ -52,7 +52,9 @@ def _claims_from_context(ctx: Context) -> dict:
     """
     request = getattr(ctx.request_context, "request", None)
     if request is None:
-        raise AuthError("no HTTP request context (is this running over streamable HTTP?)")
+        raise AuthError(
+            "no HTTP request context (is this running over streamable HTTP?)"
+        )
     try:
         token = bearer_from_header(request.headers.get("authorization"))
         return verify(token)
@@ -61,11 +63,13 @@ def _claims_from_context(ctx: Context) -> dict:
 
 
 @mcp.tool()
-def get_my_status(ctx: Context) -> dict:
-    """Return the calling student's own homework status.
+def get_student_status(ctx: Context) -> dict:
+    """Return the CALLER'S OWN homework status. Use this when someone asks about
+    their own homework. Takes no arguments — the caller's identity is read from
+    their token, so you never need (and must not ask for) a student id.
 
-    Takes NO student_id argument (regression guard §7): identity is the verified
-    token's ``sub``. A student can therefore only ever see their own status.
+    Identity is the verified token's ``sub`` (regression guard §7): a student can
+    therefore only ever see their own status.
     """
     claims = _claims_from_context(ctx)
     sub = claims["sub"]
@@ -74,7 +78,10 @@ def get_my_status(ctx: Context) -> dict:
 
 @mcp.tool()
 async def get_group_status(ctx: Context, student_ids: list[str]) -> list[dict]:
-    """Return statuses for a group of students — teacher only.
+    """Return homework statuses for SPECIFIC NAMED students. Use this when the
+    caller asks about one or more other students by id (e.g. a teacher asking how
+    the group is doing). Pass the student ids the caller names in ``student_ids``.
+    Teacher role only.
 
     Authorization (§5.4, regression guard §7):
       - caller must have role == "teacher" (student-role callers are rejected);

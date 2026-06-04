@@ -134,6 +134,8 @@ uv run python -m mcp_rest_lab.runtime
 # 6. Terminal D — Streamlit thin client
 uv run streamlit run app/streamlit_app.py
 ```
+### Run sequence with existing users
+If users tokens have been minted and the .env file is ready, just run ```bash ./start_services.sh```
 
 ---
 

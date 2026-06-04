@@ -23,9 +23,14 @@ TOKEN_TTL_SECONDS = 3600
 # Dev-only default. Real deployments MUST set JWT_SECRET in the environment.
 _DEV_SECRET = "dev-only-insecure-secret-change-me"
 
-# The five students this lab knows about. Teacher tokens carry this as their
+# The A-Team members this lab knows about. Teacher tokens carry this as their
 # `students` claim (the set they are authorized to query).
-STUDENTS = [f"student_{i:03d}" for i in range(1, 6)]
+STUDENTS = [
+    "hannibal",
+    "face",
+    "ba_baracus",
+    "murdock",
+]
 
 
 def secret() -> str:

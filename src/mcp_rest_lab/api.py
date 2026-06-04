@@ -50,7 +50,9 @@ async def students_status(
     """Fan out to core.get_student_status in parallel and return shaped results.
 
     Auth here is intentionally coarse (any valid token) — this track exists to
-    demonstrate REST auth wiring, not to mirror the MCP server's role rules.
+    demonstrate REST auth wiring, not to mirror the MCP server's role rules. We do
+    NOT deny non-teachers; we serve the data and simply report the caller's role,
+    so the contrast with the strict MCP path (where this would be 403) is visible.
     """
 
     async def one(student_id: str) -> dict:
@@ -58,4 +60,17 @@ async def students_status(
         return {"student_id": student_id, "status": result}
 
     results = await asyncio.gather(*(one(sid) for sid in body.student_ids))
-    return {"caller": claims.get("sub"), "results": list(results)}
+    is_teacher = claims.get("role") == "teacher"
+    note = (
+        "caller is a teacher"
+        if is_teacher
+        else "caller is NOT a teacher — the strict MCP path would deny this group "
+        "query; the REST track serves it anyway (coarse auth)."
+    )
+    return {
+        "caller": claims.get("sub"),
+        "role": claims.get("role"),
+        "is_teacher": is_teacher,
+        "note": note,
+        "results": list(results),
+    }

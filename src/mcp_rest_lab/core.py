@@ -16,7 +16,11 @@ def get_student_status(student_id: str) -> str:
     """
     return random.choice(
         [
-            f"{student_id} has done the homework",
-            f"{student_id} hasn't done any homework",
+            f"{student_id} has done the homework.",
+            f"{student_id} hasn't done any homework.",
+            f"{student_id} started doing homework but the connection dropped.",
+            f"It seems {student_id} has been random guessing answers on the homework. Too many attempts in very little time.",
+            f"{student_id} has completed the homework with excellent results.",
+            f"{student_id} has struggled to complete writing-related tasks.",
         ]
     )

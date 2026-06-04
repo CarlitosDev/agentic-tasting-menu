@@ -18,6 +18,8 @@ import httpx
 import streamlit as st
 
 ENDPOINT_URL = os.environ.get("ENDPOINT_URL", "http://localhost:8080/invocations")
+# The FastAPI REST learning track (§5.5), queried directly — no agent in between.
+API_URL = os.environ.get("API_URL", "http://localhost:8001/students/status")
 # tokens.json is produced by `python -m mcp_rest_lab.mint_tokens`.
 TOKENS_FILE = Path(os.environ.get("TOKENS_FILE", "tokens.json"))
 
@@ -59,14 +61,13 @@ st.title("mcp-rest-lab")
 st.caption("Thin client → AgentCore /invocations. Identity is the token.")
 
 tokens = load_tokens()
-identities = list(tokens.keys()) or [
-    "student_001",
-    "student_002",
-    "student_003",
-    "student_004",
-    "student_005",
-    "teacher_001",
-]
+# Identities come straight from tokens.json — nothing is hardcoded here. Students
+# (for the REST tab's id dropdown) are simply the non-teacher identities; the
+# minter names every teacher with a "teacher" prefix, the same convention the
+# Agent tab's default-prompt branch relies on.
+identities = list(tokens.keys())
+STUDENTS = [i for i in identities if not i.startswith("teacher")]
+
 
 with st.sidebar:
     st.header("Identity")
@@ -78,30 +79,64 @@ with st.sidebar:
             help="No tokens.json found. Run `python -m mcp_rest_lab.mint_tokens` "
             "or paste a token here.",
         )
-    st.caption(f"Endpoint: {ENDPOINT_URL}")
+    st.caption(f"Agent endpoint: {ENDPOINT_URL}")
+    st.caption(f"REST endpoint: {API_URL}")
 
-default_prompt = (
-    "How is the group doing on homework?"
-    if identity.startswith("teacher")
-    else "How am I doing on my homework?"
-)
-prompt = st.text_input("Prompt", value=default_prompt)
+agent_tab, rest_tab = st.tabs(["Agent", "REST API"])
 
-if st.button("Send", type="primary"):
-    if not token:
-        st.error("No token for this identity. Mint tokens or paste one.")
-    else:
-        headers = {"Authorization": f"Bearer {token}"}
-        body = {"prompt": prompt}
-        placeholder = st.empty()
-        acc = ""
-        try:
-            with httpx.stream(
-                "POST", ENDPOINT_URL, json=body, headers=headers, timeout=120
-            ) as response:
+with agent_tab:
+    st.caption("Prompt the agent → AgentCore /invocations. The agent picks tools.")
+    default_prompt = (
+        "How is the group doing on homework?"
+        if identity.startswith("teacher")
+        else "How am I doing on my homework?"
+    )
+    prompt = st.text_input("Prompt", value=default_prompt)
+
+    if st.button("Send", type="primary", key="agent_send"):
+        if not token:
+            st.error("No token for this identity. Mint tokens or paste one.")
+        else:
+            headers = {"Authorization": f"Bearer {token}"}
+            body = {"prompt": prompt}
+            placeholder = st.empty()
+            acc = ""
+            try:
+                with httpx.stream(
+                    "POST", ENDPOINT_URL, json=body, headers=headers, timeout=120
+                ) as response:
+                    response.raise_for_status()
+                    for piece in iter_sse_text(response):
+                        acc += piece
+                        placeholder.markdown(acc)
+            except httpx.HTTPError as e:
+                st.error(f"Request failed: {e}")
+
+with rest_tab:
+    st.caption(
+        "Call the FastAPI REST track directly — no agent. Same bearer token; "
+        "auth here is coarse (any valid token), so any identity may query any ids."
+    )
+    # Student ids come from the identities in tokens.json (the student_* keys),
+    # falling back to the STUDENTS literal only when no tokens file is present.
+    student_options = STUDENTS
+    student_ids = st.multiselect(
+        "Student ids", options=student_options, default=student_options, key="rest_ids"
+    )
+
+    if st.button("Query", type="primary", key="rest_send"):
+        if not token:
+            st.error("No token for this identity. Mint tokens or paste one.")
+        elif not student_ids:
+            st.error("Select at least one student id.")
+        else:
+            headers = {"Authorization": f"Bearer {token}"}
+            body = {"student_ids": student_ids}
+            try:
+                response = httpx.post(API_URL, json=body, headers=headers, timeout=30)
                 response.raise_for_status()
-                for piece in iter_sse_text(response):
-                    acc += piece
-                    placeholder.markdown(acc)
-        except httpx.HTTPError as e:
-            st.error(f"Request failed: {e}")
+                st.json(response.json())
+            except httpx.HTTPStatusError as e:
+                st.error(f"{e.response.status_code}: {e.response.text}")
+            except httpx.HTTPError as e:
+                st.error(f"Request failed: {e}")
