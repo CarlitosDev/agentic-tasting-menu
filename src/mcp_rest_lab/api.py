@@ -1,9 +1,8 @@
-"""api.py — FastAPI REST learning track (§5.5). OFF THE CRITICAL PATH.
+"""api.py — FastAPI REST learner-state surface (§5.5).
 
-This endpoint exists ONLY as a REST surface to exercise the same auth helpers
-against a different framework. It is NOT called by the MCP server, the Strands
-agent, or the runtime — nothing depends on it (locked decision §4.2). It calls
-``core`` directly, exactly like the MCP server does.
+This endpoint is not called by the MCP server, the Strands agent, or the runtime:
+it is a parallel REST surface over the same ``core`` facade. Authorization is now
+strict because this serves real learner state.
 
 Run:  uv run uvicorn mcp_rest_lab.api:app --port 8001
 """
@@ -19,7 +18,7 @@ from pydantic import BaseModel
 from . import core
 from .auth import verify
 
-app = FastAPI(title="mcp-rest-lab REST learning track")
+app = FastAPI(title="mcp-rest-lab learner-state REST API")
 
 # HTTPBearer parses the "Authorization: Bearer <t>" header for us.
 _bearer = HTTPBearer(auto_error=True)
@@ -39,7 +38,39 @@ def require_token(
 
 
 class StatusRequest(BaseModel):
-    student_ids: list[str]
+    student_ids: list[str] | None = None
+    window_days: int | None = 30
+
+
+def authorize_student_ids(claims: dict, requested_ids: list[str] | None) -> list[str]:
+    """Resolve and authorize REST-visible student ids from token claims."""
+    sub = claims.get("sub")
+    role = claims.get("role")
+
+    if role == "student":
+        resolved = requested_ids or [sub]
+        if resolved != [sub]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="forbidden: students may only query their own status",
+            )
+        return resolved
+
+    if role == "teacher":
+        allowed = set(claims.get("students") or [])
+        resolved = requested_ids or sorted(allowed)
+        out_of_scope = set(resolved) - allowed
+        if out_of_scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"forbidden: ids outside your authorized set: {sorted(out_of_scope)}",
+            )
+        return resolved
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"forbidden: unsupported role {role!r}",
+    )
 
 
 @app.post("/students/status")
@@ -47,30 +78,27 @@ async def students_status(
     body: StatusRequest,
     claims: dict = Depends(require_token),
 ) -> dict:
-    """Fan out to core.get_student_status in parallel and return shaped results.
+    """Return authorized learner-state statuses from the shared core facade."""
+    student_ids = authorize_student_ids(claims, body.student_ids)
+    try:
+        window = core.window_from_days(body.window_days)
+        results = await asyncio.to_thread(
+            core.get_group_status,
+            student_ids,
+            window=window,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
 
-    Auth here is intentionally coarse (any valid token) — this track exists to
-    demonstrate REST auth wiring, not to mirror the MCP server's role rules. We do
-    NOT deny non-teachers; we serve the data and simply report the caller's role,
-    so the contrast with the strict MCP path (where this would be 403) is visible.
-    """
-
-    async def one(student_id: str) -> dict:
-        result = await asyncio.to_thread(core.get_student_status, student_id)
-        return {"student_id": student_id, "status": result}
-
-    results = await asyncio.gather(*(one(sid) for sid in body.student_ids))
     is_teacher = claims.get("role") == "teacher"
-    note = (
-        "caller is a teacher"
-        if is_teacher
-        else "caller is NOT a teacher — the strict MCP path would deny this group "
-        "query; the REST track serves it anyway (coarse auth)."
-    )
     return {
         "caller": claims.get("sub"),
         "role": claims.get("role"),
         "is_teacher": is_teacher,
-        "note": note,
-        "results": list(results),
+        "learner_state_root": str(core.learner_state_root()),
+        "window_days": body.window_days,
+        "results": [result.model_dump(mode="json") for result in results],
     }

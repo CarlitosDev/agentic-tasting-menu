@@ -1,15 +1,16 @@
 # mcp-rest-lab
 
-A toy-but-near-prod baseline for learning agentic API design. Five layers, one
-identity flow, every boundary modelled on what you'd deploy in production.
+A near-prod baseline for learning agentic API design over real learner-state
+artifacts. Five layers, one identity flow, every boundary modelled on what you'd
+deploy in production.
 
 ---
 
 ## What this is
 
-The system answers the question: *"has student X done their homework?"* — but the
-interesting part isn't the answer, it's how identity, authorization, and request
-routing flow through the stack.
+The system answers the question: *"what is this student's learner status?"* — but
+the interesting part is how identity, authorization, and request routing flow
+through the stack.
 
 ```
 Streamlit (holds JWT, picks student/teacher)
@@ -17,24 +18,24 @@ Streamlit (holds JWT, picks student/teacher)
     → AgentCore runtime reads the bearer from request context
       → Strands agent wires the bearer onto its MCP client connection
         → MCP server verify()s the token, derives sub/role, calls core
-          → core.get_student_status(sub) — pure, no auth, no I/O
+          → core.get_student_status(sub) — learner-state-core reader + mapper
 ```
 
 **The MCP server is the auth boundary.** Not the agent, not the runtime. No layer
-below Streamlit ever receives identity as a plain argument — `get_my_status()` takes
-zero parameters; it reads `sub` from the verified token. A student asking
+below Streamlit ever receives identity as a plain argument — `get_student_status()`
+takes zero identity parameters; it reads `sub` from the verified token. A student asking
 "how am I doing?" cannot retrieve another student's status through any path in the
-MCP/agent chain.
+MCP/agent chain. The REST API now applies the same strict student/teacher scoping.
 
 ---
 
 ## What was built
 
 ### `src/mcp_rest_lab/core.py`
-Pure domain function: `get_student_status(student_id) -> str`. Returns a random
-"has done / hasn't done" string. No I/O, no auth, no framework imports. Both the
-MCP server and the REST learning track call this directly — it is the single source
-of truth that every layer above it shapes and authorizes access to. Scaffolding for `data services`.
+Application facade over `learner-state-core`. It creates a filesystem reader from
+`LEARNER_STATE_ROOT`, calls `LearnerStateQueryService`, and maps upstream 0.x
+models into stable app-owned DTOs. Both MCP and REST call this directly — it is
+the single source of truth that every layer above it authorizes and renders.
 
 ### `src/mcp_rest_lab/auth.py`
 Shared identity helpers used by every layer:
@@ -45,25 +46,25 @@ Shared identity helpers used by every layer:
   `issuer` so a token minted for another system is rejected.
 - `bearer_from_header(authorization)` — extracts the raw token from an
   `Authorization: Bearer <t>` header value.
-- `STUDENTS` — `["student_001", …, "student_005"]`, shared by mint and the teacher
-  token's `students` claim.
+- `STUDENTS` — demo fallback identities. When `LEARNER_STATE_ROOT` contains
+  artifacts, `mint_tokens.py` prefers the real student ids from the reader.
 
 Claim shapes (`iss`/`aud`/`sub`/`role`/`exp`/custom) are kept identical to what
 **Cognito** or **Auth0** would issue, so swapping HS256 → RS256/JWKS later is a single
 `verify()` change, not a rewrite of every caller.
 
 ### `src/mcp_rest_lab/mint_tokens.py`
-Run once to bootstrap the local environment. Prints 5 student tokens and 1 teacher
-token in copy-pasteable form, and writes `tokens.json` so the Streamlit selector
-can load them without manual pasting.
+Run once to bootstrap the local environment. Prints student and teacher tokens in
+copy-pasteable form, and writes `tokens.json` so the Streamlit selector can load
+them without manual pasting.
 `uv run python -m mcp_rest_lab.mint_tokens`
 
 ### `src/mcp_rest_lab/mcp_server.py`
-FastMCP server over **streamable HTTP** on `:8000` (path `/mcp`). Two tools:
+FastMCP server over **streamable HTTP** on `:8002` (path `/mcp`). Two tools:
 
 | Tool | Who can call it | How auth works |
 | --- | --- | --- |
-| `get_my_status()` | Any valid bearer token | Identity = token's `sub`. **No parameters.** |
+| `get_student_status()` | Any valid bearer token | Identity = token's `sub`. **No identity parameter.** |
 | `get_group_status(student_ids)` | Teacher tokens only | `role == "teacher"` required; every requested id must be a subset of the token's `students` claim |
 
 Both tools read + `verify()` the incoming token from the HTTP request headers
@@ -73,11 +74,10 @@ server **never imports or calls the REST API** — it calls `core` directly.
 `get_group_status` fans out to `core` concurrently via `asyncio.gather`.
 
 ### `src/mcp_rest_lab/api.py`
-FastAPI REST **learning track** on `:8001`. **Off the critical path** — nothing in
-the agent or runtime depends on it. Its single endpoint (`POST /students/status`)
-fans out to `core` in parallel and is protected by the same `auth.verify` dependency,
-giving a second surface to exercise the same token auth pattern against a different
-framework. Clearly marked in the file header as a learning surface only.
+FastAPI REST API on `:8001`. **Off the critical path** — nothing in the agent or
+runtime depends on it. Its single endpoint (`POST /students/status`) calls `core`
+and applies strict token scoping: students can only query themselves; teachers can
+only query ids in their `students` claim.
 
 ### `src/mcp_rest_lab/agent.py`
 Strands `Agent` factory. The agent's available tools are exactly the MCP server's
@@ -117,13 +117,13 @@ endpoint; nothing else in this file changes.
 # 1. Install dependencies
 uv sync
 
-# 2. Mint tokens — prints 6 tokens, writes tokens.json
+# 2. Mint tokens — uses LEARNER_STATE_ROOT ids when present, writes tokens.json
 uv run python -m mcp_rest_lab.mint_tokens
 
-# 3. Terminal A — MCP server (streamable HTTP, :8000)
+# 3. Terminal A — MCP server (streamable HTTP, :8002)
 uv run python -m mcp_rest_lab.mcp_server
 
-# 4. Terminal B (optional, learning track) — FastAPI REST surface
+# 4. Terminal B (optional) — FastAPI REST surface
 uv run uvicorn mcp_rest_lab.api:app --port 8001
 
 # 5. Terminal C — AgentCore runtime (:8080, needs AWS Bedrock creds)
@@ -159,8 +159,8 @@ Token structure:
 ```
 
 The `students` claim on the teacher token is the authorization list for
-`get_group_status` — the MCP server rejects any request for ids not in that set,
-regardless of what the agent (or a direct caller) sends.
+`get_group_status` and the REST API — both reject any request for ids not in that
+set, regardless of what the agent (or a direct caller) sends.
 
 ---
 
@@ -172,15 +172,15 @@ uv run python -m mcp_rest_lab.mint_tokens
 
 # Start MCP server then exercise the auth boundary directly:
 uv run python -m mcp_rest_lab.mcp_server &
-# (use any MCP streamable-HTTP client against http://127.0.0.1:8000/mcp)
+# (use any MCP streamable-HTTP client against http://127.0.0.1:8002/mcp)
 
-# REST track — valid token
+# REST API — valid teacher token scoped to requested students
 uv run uvicorn mcp_rest_lab.api:app --port 8001 &
-TOK=$(uv run python -c "from mcp_rest_lab.auth import make_token; print(make_token('teacher_001','teacher'))")
+TOK=$(uv run python -c "from mcp_rest_lab.auth import make_token; print(make_token('teacher_001','teacher', students=['student_001','student_002']))")
 curl -s -X POST localhost:8001/students/status \
   -H "Authorization: Bearer $TOK" \
   -H 'Content-Type: application/json' \
-  -d '{"student_ids":["student_001","student_002"]}'
+  -d '{"student_ids":["student_001","student_002"],"window_days":30}'
 
 # REST track — invalid token (expect 401)
 curl -s -o /dev/null -w "%{http_code}\n" \
@@ -207,7 +207,9 @@ or set them inline. Key variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `JWT_SECRET` | `dev-only-insecure-secret-change-me` | HS256 signing secret — change for anything real |
-| `MCP_URL` | `http://127.0.0.1:8000/mcp` | Where the agent finds the MCP server |
+| `LEARNER_STATE_ROOT` | `learner_state_data` | Per-student learner-state artifact directory |
+| `MCP_PORT` | `8002` | Local MCP server port |
+| `MCP_URL` | `http://127.0.0.1:8002/mcp` | Where the agent finds the MCP server |
 | `ENDPOINT_URL` | `http://localhost:8080/invocations` | Where Streamlit POSTs — swap for the AgentCore Runtime URL in prod |
 | `BEDROCK_MODEL_ID` | `us.anthropic.claude-sonnet-4-20250514-v1:0` | Bedrock cross-region inference profile |
 | `AWS_REGION` | `us-east-1` | Bedrock region |
@@ -248,9 +250,9 @@ before the code was written:
 These were set in the build spec and are not up for revision in v1:
 
 1. **MCP server calls `core` directly.** It never calls or imports the REST API.
-2. **REST API is a parallel learning track.** Nothing in the agent or runtime depends on it.
+2. **REST API is parallel to the agent path.** Nothing in the agent or runtime depends on it.
 3. **`BedrockAgentCoreApp` provides `/invocations` and `/ping`.** No hand-rolled FastAPI for those routes.
-4. **Identity is the token.** `get_my_status` takes no parameters. `get_group_status` authorizes against the token's claims, not against a passed-in id.
+4. **Identity is the token.** `get_student_status` takes no identity parameter. `get_group_status` authorizes against the token's claims, not against a passed-in id.
 5. **Streamlit does not import the agent.** It is a pure HTTP client.
 
 ---
@@ -258,4 +260,4 @@ These were set in the build spec and are not up for revision in v1:
 ## What's out of scope for v1
 
 Real IdP / RS256 / JWKS, AgentCore Gateway / Memory / Cedar policies, actual AWS
-deployment, persistence, real student data, rate limiting, observability, A2A serving.
+deployment, persistence writes, S3 reader, rate limiting, observability, A2A serving.

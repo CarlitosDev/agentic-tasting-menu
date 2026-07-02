@@ -15,10 +15,11 @@ from mcp.client.streamable_http import streamable_http_client
 from strands import Agent
 from strands.models import BedrockModel
 from strands.tools.mcp import MCPClient
+from strands.types.exceptions import MCPClientInitializationError
 
 # VERIFY (confirmed against mcp 1.27.2): default FastMCP streamable-HTTP path is
 # "/mcp", so the full URL is host:port + /mcp.
-MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp")
+MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8002/mcp")
 
 # VERIFY: a Bedrock model id available in your account/region. Cross-region
 # inference profile ids look like "us.anthropic.claude-sonnet-4-*". Override via
@@ -102,8 +103,15 @@ async def stream_answer(prompt: str, bearer_token: str) -> AsyncIterator[str]:
         mcp_client = MCPClient(
             lambda: streamable_http_client(MCP_URL, http_client=http_client)
         )
-        with mcp_client:
-            agent = build_agent(mcp_client)
-            async for event in agent.stream_async(prompt):
-                if "data" in event:
-                    yield event["data"]
+        try:
+            with mcp_client:
+                agent = build_agent(mcp_client)
+                async for event in agent.stream_async(prompt):
+                    if "data" in event:
+                        yield event["data"]
+        except MCPClientInitializationError as e:
+            raise RuntimeError(
+                f"unable to initialize MCP client at {MCP_URL}; make sure the "
+                "MCP server is running on the same port and no other local "
+                f"service owns that port. Original error: {e}"
+            ) from e

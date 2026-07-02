@@ -3,14 +3,14 @@
 Two tools, both of which verify the incoming bearer token and derive identity
 from it — never from a tool argument:
 
-  - get_my_status()                 student self-query, no parameters
+  - get_student_status()            student self-query, no identity parameter
   - get_group_status(student_ids)   teacher query, authorized by the token claim
 
 Transport is streamable HTTP so the bearer token rides in the request headers.
 The MCP server calls ``core`` directly and NEVER imports/calls the REST api.py
 (locked decision §4.1, regression guard §7).
 
-Run:  uv run python -m mcp_rest_lab.mcp_server   (serves :8000, path /mcp)
+Run:  uv run python -m mcp_rest_lab.mcp_server   (serves :8002, path /mcp)
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from .auth import bearer_from_header, verify
 # constructor; streamable-HTTP is exposed at `streamable_http_path` (default
 # "/mcp"). run(transport="streamable-http") binds host:port from here.
 HOST = os.environ.get("MCP_HOST", "127.0.0.1")
-PORT = int(os.environ.get("MCP_PORT", "8000"))
+PORT = int(os.environ.get("MCP_PORT", "8002"))
 
 mcp = FastMCP("mcp-rest-lab", host=HOST, port=PORT)
 
@@ -64,8 +64,8 @@ def _claims_from_context(ctx: Context) -> dict:
 
 @mcp.tool()
 def get_student_status(ctx: Context) -> dict:
-    """Return the CALLER'S OWN homework status. Use this when someone asks about
-    their own homework. Takes no arguments — the caller's identity is read from
+    """Return the CALLER'S OWN learner status. Use this when someone asks about
+    their own learning state. Takes no arguments — the caller's identity is read from
     their token, so you never need (and must not ask for) a student id.
 
     Identity is the verified token's ``sub`` (regression guard §7): a student can
@@ -73,12 +73,13 @@ def get_student_status(ctx: Context) -> dict:
     """
     claims = _claims_from_context(ctx)
     sub = claims["sub"]
-    return {"student_id": sub, "status": core.get_student_status(sub)}
+    window = core.window_from_days(30)
+    return core.get_student_status(sub, window=window).model_dump(mode="json")
 
 
 @mcp.tool()
 async def get_group_status(ctx: Context, student_ids: list[str]) -> list[dict]:
-    """Return homework statuses for SPECIFIC NAMED students. Use this when the
+    """Return learner statuses for SPECIFIC NAMED students. Use this when the
     caller asks about one or more other students by id (e.g. a teacher asking how
     the group is doing). Pass the student ids the caller names in ``student_ids``.
     Teacher role only.
@@ -102,10 +103,13 @@ async def get_group_status(ctx: Context, student_ids: list[str]) -> list[dict]:
         )
 
     async def one(student_id: str) -> dict:
-        # core.get_student_status is sync+pure; run in a thread so gather is
-        # genuinely concurrent and we model a real async fan-out boundary.
-        status = await asyncio.to_thread(core.get_student_status, student_id)
-        return {"student_id": student_id, "status": status}
+        window = core.window_from_days(30)
+        status = await asyncio.to_thread(
+            core.get_student_status,
+            student_id,
+            window=window,
+        )
+        return status.model_dump(mode="json")
 
     return list(await asyncio.gather(*(one(sid) for sid in student_ids)))
 

@@ -18,7 +18,7 @@ import httpx
 import streamlit as st
 
 ENDPOINT_URL = os.environ.get("ENDPOINT_URL", "http://localhost:8080/invocations")
-# The FastAPI REST learning track (§5.5), queried directly — no agent in between.
+# The FastAPI REST learner-state API (§5.5), queried directly — no agent in between.
 API_URL = os.environ.get("API_URL", "http://localhost:8001/students/status")
 # tokens.json is produced by `python -m mcp_rest_lab.mint_tokens`.
 TOKENS_FILE = Path(os.environ.get("TOKENS_FILE", "tokens.json"))
@@ -87,9 +87,9 @@ agent_tab, rest_tab = st.tabs(["Agent", "REST API"])
 with agent_tab:
     st.caption("Prompt the agent → AgentCore /invocations. The agent picks tools.")
     default_prompt = (
-        "How is the group doing on homework?"
+        "How is the group doing?"
         if identity.startswith("teacher")
-        else "How am I doing on my homework?"
+        else "How am I doing?"
     )
     prompt = st.text_input("Prompt", value=default_prompt)
 
@@ -113,15 +113,18 @@ with agent_tab:
                 st.error(f"Request failed: {e}")
 
 with rest_tab:
-    st.caption(
-        "Call the FastAPI REST track directly — no agent. Same bearer token; "
-        "auth here is coarse (any valid token), so any identity may query any ids."
-    )
-    # Student ids come from the identities in tokens.json (the student_* keys),
-    # falling back to the STUDENTS literal only when no tokens file is present.
-    student_options = STUDENTS
+    st.caption("Call the FastAPI REST API directly — no agent.")
+    student_options = STUDENTS if identity.startswith("teacher") else [identity]
     student_ids = st.multiselect(
         "Student ids", options=student_options, default=student_options, key="rest_ids"
+    )
+    window_days = st.number_input(
+        "Window days",
+        min_value=1,
+        max_value=365,
+        value=30,
+        step=1,
+        key="rest_window_days",
     )
 
     if st.button("Query", type="primary", key="rest_send"):
@@ -131,11 +134,50 @@ with rest_tab:
             st.error("Select at least one student id.")
         else:
             headers = {"Authorization": f"Bearer {token}"}
-            body = {"student_ids": student_ids}
+            body = {"student_ids": student_ids, "window_days": int(window_days)}
             try:
                 response = httpx.post(API_URL, json=body, headers=headers, timeout=30)
                 response.raise_for_status()
-                st.json(response.json())
+                payload = response.json()
+                results = payload.get("results", [])
+                if not results:
+                    st.info("No learner-state rows returned.")
+                else:
+                    active = sum(r["overall_state"] == "active" for r in results)
+                    idle = sum(r["overall_state"] == "idle" for r in results)
+                    inactive = sum(r["overall_state"] == "absent" for r in results)
+                    cols = st.columns(3)
+                    cols[0].metric("Active", active)
+                    cols[1].metric("Idle", idle)
+                    cols[2].metric("Inactive", inactive)
+
+                    rows = [
+                        {
+                            "student_id": r["student_id"],
+                            "status": r["status_label"],
+                            "mode": r["engagement_mode"],
+                            "last_activity": r["last_activity_at"],
+                            "units_completed": r["self_study"]["units_completed"],
+                            "accuracy": r["self_study"]["accuracy"],
+                            "lessons": r["online"]["lesson_count"],
+                            "level": r["online"]["level"],
+                        }
+                        for r in results
+                    ]
+                    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+                    selected = st.selectbox(
+                        "Details",
+                        options=[r["student_id"] for r in results],
+                        key="rest_detail_id",
+                    )
+                    detail = next(r for r in results if r["student_id"] == selected)
+                    st.markdown(detail["summary"])
+                    left, right = st.columns(2)
+                    left.subheader("Self-study")
+                    left.json(detail["self_study"], expanded=False)
+                    right.subheader("Online")
+                    right.json(detail["online"], expanded=False)
             except httpx.HTTPStatusError as e:
                 st.error(f"{e.response.status_code}: {e.response.text}")
             except httpx.HTTPError as e:

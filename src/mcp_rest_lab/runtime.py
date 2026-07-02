@@ -63,8 +63,11 @@ async def invoke(payload, context):
         yield f"error: {e}"
         return
 
-    async for chunk in stream_answer(prompt, token):
-        yield chunk
+    try:
+        async for chunk in stream_answer(prompt, token):
+            yield chunk
+    except Exception as e:
+        yield f"error: {e}"
 
 
 if __name__ == "__main__":

@@ -8,8 +8,13 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-# Set START_REST=0 to skip the optional REST learning track.
+# Set START_REST=0 to skip the optional REST API.
 START_REST="${START_REST:-1}"
+MCP_PORT="${MCP_PORT:-8002}"
+MCP_URL="${MCP_URL:-http://127.0.0.1:${MCP_PORT}/mcp}"
+REST_PORT="${REST_PORT:-8001}"
+RUNTIME_PORT="${RUNTIME_PORT:-8080}"
+STREAMLIT_PORT="${STREAMLIT_PORT:-8501}"
 
 PIDS=()
 
@@ -38,6 +43,17 @@ start_service() {
   echo "${name} PID: ${pid}"
 }
 
+require_free_port() {
+  local name="$1"
+  local port="$2"
+
+  if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "Error: ${name} port ${port} is already in use."
+    echo "Set a different port via environment variables, or stop the process using it."
+    exit 1
+  fi
+}
+
 wait_for_any_exit() {
   # Bash 4.3+ supports `wait -n`; macOS default Bash 3.2 does not.
   if wait -n 2>/dev/null; then
@@ -59,21 +75,29 @@ echo "[1/5] Installing dependencies with uv sync..."
 cd "$ROOT_DIR"
 uv sync
 
+echo "Using MCP_URL=${MCP_URL}"
+require_free_port "MCP server" "$MCP_PORT"
+if [[ "$START_REST" == "1" ]]; then
+  require_free_port "REST API" "$REST_PORT"
+fi
+require_free_port "Agent runtime" "$RUNTIME_PORT"
+require_free_port "Streamlit" "$STREAMLIT_PORT"
+
 echo "[2/5] Starting MCP server..."
-start_service "MCP server" "uv run python -m mcp_rest_lab.mcp_server"
+start_service "MCP server" "MCP_PORT=\"$MCP_PORT\" uv run python -m mcp_rest_lab.mcp_server"
 
 if [[ "$START_REST" == "1" ]]; then
   echo "[3/5] Starting optional REST API..."
-  start_service "REST API" "uv run uvicorn mcp_rest_lab.api:app --port 8001"
+  start_service "REST API" "uv run uvicorn mcp_rest_lab.api:app --port \"$REST_PORT\""
 else
   echo "[3/5] Skipping optional REST API (START_REST=$START_REST)."
 fi
 
 echo "[4/5] Starting runtime (includes aws sso login)..."
-start_service "Agent runtime" "source .env; aws sso login --profile \"\$AWS_PROFILE\"; uv run python -m mcp_rest_lab.runtime"
+start_service "Agent runtime" "source .env; export MCP_URL=\"$MCP_URL\"; aws sso login --profile \"\$AWS_PROFILE\"; uv run python -m mcp_rest_lab.runtime"
 
 echo "[5/5] Starting Streamlit..."
-start_service "Streamlit" "uv run streamlit run app/streamlit_app.py"
+start_service "Streamlit" "uv run streamlit run app/streamlit_app.py --server.port \"$STREAMLIT_PORT\""
 
 echo ""
 echo "Services are running under this launcher."
